@@ -25,4 +25,5 @@ jobs:
       - name: Ping Claude Code to Start 5-Hour Window
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: claude -p "Hi" --dangerously-skip-permissions
+        # Allow step to complete cleanly even if current usage limit is active
+        run: claude -p "Hi" --dangerously-skip-permissions || true
