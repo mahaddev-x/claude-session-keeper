@@ -22,6 +22,16 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Restore Claude Auth Credentials
+        env:
+          CLAUDE_CONFIG_JSON: ${{ secrets.CLAUDE_CONFIG_JSON }}
+        run: |
+          mkdir -p ~/.claude
+          if [ -n "$CLAUDE_CONFIG_JSON" ]; then
+            python3 -c "import os; open(os.path.expanduser('~/.claude.json'), 'w').write(os.environ['CLAUDE_CONFIG_JSON'])"
+            chmod 600 ~/.claude.json
+          fi
+
       - name: Ping Claude Code to Start 5-Hour Window
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
