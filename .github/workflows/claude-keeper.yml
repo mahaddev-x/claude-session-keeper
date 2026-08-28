@@ -1,0 +1,33 @@
+name: Claude Session Keeper
+
+on:
+  schedule:
+    # Trigger at 08:00, 13:00, 18:00, 23:00 UTC daily (Every 5 hours)
+    # Adjust times to fit your preferred daily schedule in UTC
+    - cron: '0 8,13,18,23 * * *'
+  workflow_dispatch: # Allows manual run from GitHub repository Actions tab
+
+jobs:
+  ping-claude:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Restore Claude Auth Credentials
+        run: |
+          mkdir -p ~/.claude
+          echo "${{ secrets.CLAUDE_CONFIG_JSON }}" > ~/.claude.json
+          chmod 600 ~/.claude.json
+
+      - name: Ping Claude Code to Start 5-Hour Window
+        run: claude -p "Hi" --dangerously-skip-permissions
