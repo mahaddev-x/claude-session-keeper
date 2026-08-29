@@ -1,36 +1,130 @@
 name: Claude Session Keeper
 
+# Pings Claude once per 5-hour usage window, as soon as possible AFTER the
+# window resets - never before. The reset time drifts forward each cycle, so
+# the next ping time is stored in the Actions cache rather than hardcoded in
+# cron. Cron here is only a poll; the stored state decides whether to ping.
+
 on:
   schedule:
-    # Every 5h, anchored to session window that starts 08:35 UTC.
-    # UTC 03:35 08:35 13:35 18:35 = local UTC+5 08:35 13:35 18:35 23:35
-    - cron: '35 3,8,13,18 * * *'
-  workflow_dispatch: # Allows manual run from GitHub repository Actions tab
+    - cron: '5 * * * *' # hourly poll - the state file decides if it's due
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Ping now, ignoring the stored schedule'
+        type: boolean
+        default: false
+      set_next_utc:
+        description: 'Seed next ping time (UTC "YYYY-MM-DD HH:MM"), no ping'
+        type: string
+        default: ''
+
+concurrency:
+  group: claude-keeper
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  WINDOW_SECONDS: 18000 # 5h
+  BUFFER_SECONDS: 180 # ping this long after reset, never before
+  RETRY_SECONDS: 600 # if we were rate limited, re-check this soon
 
 jobs:
-  ping-claude:
+  keeper:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Restore ping state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: claude-keeper-state-${{ github.run_id }}
+          restore-keys: claude-keeper-state-
+
+      - name: Decide whether the window has reset
+        id: decide
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          NOW=$(date -u +%s)
+
+          SEED='${{ inputs.set_next_utc }}'
+          if [ -n "$SEED" ]; then
+            NEXT=$(date -u -d "$SEED" +%s)
+            echo "$NEXT" > state/next-ping-epoch
+            echo "Seeded next ping: $(date -u -d @$NEXT)"
+            echo "due=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "Forced ping."
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ ! -f state/next-ping-epoch ]; then
+            echo "No stored state - treating as first run, pinging now."
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NEXT=$(cat state/next-ping-epoch)
+          if [ "$NOW" -ge "$NEXT" ]; then
+            echo "Window reset at $(date -u -d @$NEXT) - due."
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not due. Next ping $(date -u -d @$NEXT), in $(( (NEXT - NOW) / 60 )) min."
+            echo "due=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.decide.outputs.due == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install Claude Code CLI
+        if: steps.decide.outputs.due == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Ping Claude Code to Start 5-Hour Window
+      - name: Ping Claude to open a fresh 5-hour window
+        if: steps.decide.outputs.due == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          set -uo pipefail
           if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set. Run 'claude setup-token' locally and add it."
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set."
             exit 1
           fi
-          set -o pipefail
-          claude -p "Hi" --dangerously-skip-permissions 2>&1 | tee out.txt
-          if grep -qi "Not logged in\|Invalid API key\|authentication" out.txt; then
+
+          PING_AT=$(date -u +%s)
+          claude -p "Hi" --dangerously-skip-permissions >out.txt 2>&1 || true
+          cat out.txt
+
+          if grep -qiE 'usage limit|rate limit|too many requests|429' out.txt; then
+            NEXT=$(( PING_AT + RETRY_SECONDS ))
+            echo "$NEXT" > state/next-ping-epoch
+            echo "::warning::Still rate limited - window had not reset. Retrying after $(date -u -d @$NEXT)."
+            exit 0
+          fi
+
+          if grep -qiE 'not logged in|invalid api key|authentication|unauthorized' out.txt; then
             echo "::error::Auth failed - token invalid or expired."
             exit 1
           fi
+
+          NEXT=$(( PING_AT + WINDOW_SECONDS + BUFFER_SECONDS ))
+          echo "$NEXT" > state/next-ping-epoch
+          echo "Window opened at $(date -u -d @$PING_AT). Next ping $(date -u -d @$NEXT)."
+
+      - name: Save ping state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: claude-keeper-state-${{ github.run_id }}
