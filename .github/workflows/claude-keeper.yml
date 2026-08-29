@@ -7,7 +7,7 @@ name: Claude Session Keeper
 
 on:
   schedule:
-    - cron: '5 * * * *' # hourly poll - the state file decides if it's due
+    - cron: '*/5 * * * *' # poll every 5 min - the state file decides if it's due
   workflow_dispatch:
     inputs:
       force:
@@ -29,7 +29,7 @@ permissions:
 env:
   WINDOW_SECONDS: 18000 # 5h
   BUFFER_SECONDS: 180 # ping this long after reset, never before
-  RETRY_SECONDS: 600 # if we were rate limited, re-check this soon
+  RETRY_SECONDS: 300 # if we were rate limited, re-check on the next poll
 
 jobs:
   keeper:
