@@ -2,8 +2,9 @@ name: Claude Session Keeper
 
 on:
   schedule:
-    # Trigger at 08:00, 13:00, 18:00, 23:00 UTC daily (Every 5 hours)
-    - cron: '0 8,13,18,23 * * *'
+    # Every 5h, anchored to session window that starts 08:35 UTC.
+    # UTC 03:35 08:35 13:35 18:35 = local UTC+5 08:35 13:35 18:35 23:35
+    - cron: '35 3,8,13,18 * * *'
   workflow_dispatch: # Allows manual run from GitHub repository Actions tab
 
 jobs:
