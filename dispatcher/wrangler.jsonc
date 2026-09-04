@@ -1,0 +1,18 @@
+{
+  // Precise trigger for the Claude Session Keeper.
+  //
+  // GitHub's own `schedule:` events are heavily throttled - a '*/5' cron on
+  // this repo delivered ~7 runs/day instead of 288, so the keeper's ping
+  // landed up to 5h after the window actually reset. workflow_dispatch is
+  // not throttled, so this Worker polls on Cloudflare's cron (which is) and
+  // pokes the workflow. All keeper state stays in the GitHub Actions cache;
+  // this Worker is stateless and just says "go look".
+  "name": "claude-keeper-dispatcher",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false, // no public URL - cron is the only entrypoint
+  "observability": { "enabled": true },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}

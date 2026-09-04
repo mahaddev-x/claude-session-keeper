@@ -7,7 +7,11 @@ name: Claude Session Keeper
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # poll every 5 min - the state file decides if it's due
+    # Fallback only. GitHub throttles schedule events hard (a */5 cron here
+    # delivered ~7 runs/day, not 288), so the real trigger is a Cloudflare
+    # Worker calling workflow_dispatch - see dispatcher/. This keeps the
+    # keeper limping along rather than stopping if that Worker dies.
+    - cron: '0,30 * * * *'
   workflow_dispatch:
     inputs:
       force:
